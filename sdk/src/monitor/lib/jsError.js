@@ -65,12 +65,65 @@ function handleResourceError(event) {
 
 // 处理Promise错误
 function handlePromiseError(event) {
+  console.log("event", event);
   let reason = event.reason;
   let errorLocation = null;
   let originalReason = reason?.detail || reason;
   let locationStack = reason?.__location?.stack;
 
-  // 如果有位置信息，解析它
+  // 如果是Error实例（如ReferenceError等运行时错误）
+  if (reason instanceof Error) {
+    const stackLines = reason.stack.split("\n");
+    // 查找第一个非Promise内部的调用位置
+    for (const line of stackLines) {
+      if (
+        !line.includes("Promise.reject") &&
+        !line.includes("new Promise (<anonymous>)")
+      ) {
+        const matches =
+          line.match(/at\s+(?:\w+\s+)?\(?(.+):(\d+):(\d+)\)?/) ||
+          line.match(/\((.+):(\d+):(\d+)\)/);
+        if (matches) {
+          errorLocation = {
+            filename: matches[1],
+            line: parseInt(matches[2], 10),
+            column: parseInt(matches[3], 10),
+          };
+          break;
+        }
+      }
+    }
+
+    // 创建错误日志
+    const errorLog = createErrorLog({
+      error: reason,
+      message: reason.message,
+      filename: errorLocation?.filename || "",
+      lineno: errorLocation?.line || 0,
+      colno: errorLocation?.column || 0,
+      stack: reason.stack,
+    });
+
+    // 获取详细的错误类型
+    const detailedErrorType = getDetailedErrorType(reason);
+    errorLog.meta.errorType = detailedErrorType;
+    errorLog.meta.level = getErrorLevel(detailedErrorType);
+
+    // 添加Promise特定信息
+    errorLog.error.promise = {
+      type: event.type,
+      reason: reason.message,
+      location: errorLocation || {},
+      errorType: reason.name,
+      stack: reason.stack,
+    };
+
+    console.log("Promise Runtime Error:", errorLog);
+    tracker.send(errorLog);
+    return;
+  }
+
+  // 处理直接Promise.reject的情况
   if (locationStack) {
     const stackLines = locationStack.split("\n");
     // 查找调用Promise.reject的位置
@@ -126,8 +179,7 @@ function handlePromiseError(event) {
     timestamp: reason?.__location?.timestamp,
   };
 
-  console.log("Promise Error:", errorLog);
-
+  console.log("Promise Rejection:", errorLog);
   tracker.send(errorLog);
 }
 

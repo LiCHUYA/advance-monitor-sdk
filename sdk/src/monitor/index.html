@@ -9,7 +9,8 @@
     <div class="jsErrorBox">
       <button onclick="jsError(event)">触发js错误</button>
     </div>
-    <button onclick="promiseError()">触发promise错误</button>
+    <button onclick="promiseError()">触发promise错误 字符串</button>
+    <button onclick="promiseErrorObj()">触发promise错误 对象</button>
     <img src="https://www.baidu.com" alt="test" />
 
     <script src="../../dist/monitor-sdk.es.js"></script>
@@ -21,7 +22,14 @@
         console.log(a.b);
       }
       function promiseError() {
-        Promise.reject("test");
+        Promise.reject({
+          name: "test",
+        });
+      }
+      function promiseErrorObj() {
+        new Promise((resolve, reject) => {
+          console.log(a.b);
+        });
       }
     </script>
   </body>
