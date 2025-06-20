@@ -1,0 +1,28 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Document</title>
+  </head>
+  <body>
+    <div class="jsErrorBox">
+      <button onclick="jsError(event)">触发js错误</button>
+    </div>
+    <button onclick="promiseError()">触发promise错误</button>
+    <img src="https://www.baidu.com" alt="test" />
+
+    <script src="../../dist/monitor-sdk.es.js"></script>
+    <script>
+      function jsError(e) {
+        // 保存当前事件
+        window._lastEvent = e;
+        // 触发错误
+        console.log(a.b);
+      }
+      function promiseError() {
+        Promise.reject("test");
+      }
+    </script>
+  </body>
+</html>

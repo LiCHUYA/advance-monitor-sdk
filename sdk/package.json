@@ -8,7 +8,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "build:lib": "vite build --config vite.lib.config.js"
+    "build:lib": "vite build --config vite.lib.config.js --watch"
   },
   "author": "",
   "license": "ISC",

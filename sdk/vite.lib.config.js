@@ -7,7 +7,7 @@ export default defineConfig({
       entry: resolve(__dirname, "src/index.js"),
       name: "MonitorSDK",
       fileName: (format) => `monitor-sdk.${format}.js`,
-      formats: ["es", "umd", "cjs", "iife"],
+      formats: ["es", "umd", "cjs", "iife", "system"],
     },
     rollupOptions: {
       external: [],
@@ -27,8 +27,8 @@ export default defineConfig({
     minify: "terser",
     terserOptions: {
       compress: {
-        drop_console: true,
-        drop_debugger: true,
+        // drop_console: true,
+        // drop_debugger: true,
       },
       format: {
         comments: false,
