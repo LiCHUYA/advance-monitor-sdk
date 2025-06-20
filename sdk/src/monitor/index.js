@@ -1,3 +1,4 @@
-import { initErrorCapture } from "./lib/jsError.js";
+import { initJsErrorCapture, initXhrErrorCapture } from "./lib";
 
-initErrorCapture();
+initJsErrorCapture();
+initXhrErrorCapture();

@@ -1,7 +1,7 @@
 class SendTracker {
   constructor() {
     this.url = "http://localhost:8080/api/v1/tracker";
-    this.maxRetries = 2; // 最大重试次数
+    this.maxRetries = 1; // 最大重试次数
     this.retryDelay = 1000; // 重试延迟(ms)
     this.queue = []; // 待发送队列
     this.sending = false; // 是否正在发送

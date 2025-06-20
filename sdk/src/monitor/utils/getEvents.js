@@ -1,4 +1,4 @@
-import { MonitorEvents } from "../constant/index.js";
+import { MonitorEvents } from "../constants/index.js";
 
 const allEvents = [
   // ========== 鼠标事件 ==========

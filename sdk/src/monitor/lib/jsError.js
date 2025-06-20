@@ -1,4 +1,4 @@
-import { ErrorTypes, ErrorLevels, MonitorEvents } from "../constant/index.js";
+import { ErrorTypes, ErrorLevels, MonitorEvents } from "../constants";
 import { createErrorLog } from "../utils/createErrorLog.js";
 import { getDetailedErrorType, getErrorLevel } from "../utils/index.js";
 import tracker from "../utils/traker.js";
@@ -48,19 +48,138 @@ function handleRuntimeError(event) {
 
 // 处理资源加载错误
 function handleResourceError(event) {
-  const errorLog = createErrorLog(event);
+  // 防止事件冒泡和默认行为
+  event.preventDefault();
+
+  // 获取目标元素
+  const target = event.target;
+  if (!target) return;
+
+  // 获取资源URL
+  const resourceUrl = target.src || target.href || target.srcset;
+  if (!resourceUrl) return;
+
+  // 创建错误对象并捕获堆栈
+  const error = new Error(`Resource load failed: ${resourceUrl}`);
+
+  // 获取实际的错误位置
+  let errorLocation = {
+    filename: window.location.pathname, // 默认使用当前页面路径
+    line: 0,
+    column: 0,
+  };
+
+  try {
+    // 1. 尝试从DOM元素获取位置信息
+    const scriptStack = new Error().stack;
+    if (scriptStack) {
+      const stackLines = scriptStack.split("\n");
+      // 查找不是SDK内部的第一个调用位置
+      for (const line of stackLines) {
+        if (
+          !line.includes("monitor-sdk.es.js") &&
+          !line.includes("node_modules")
+        ) {
+          const matches = line.match(/at\s+(?:\w+\s+)?\(?(.+):(\d+):(\d+)\)?/);
+          if (matches) {
+            errorLocation = {
+              filename: matches[1],
+              line: parseInt(matches[2], 10),
+              column: parseInt(matches[3], 10),
+            };
+            break;
+          }
+        }
+      }
+    }
+
+    // 2. 如果无法从堆栈获取，尝试遍历DOM树查找元素位置
+    if (errorLocation.line === 0 && target.parentElement) {
+      let currentNode = target;
+      let lineCount = 0;
+      let columnCount = 0;
+
+      // 获取元素在HTML中的位置
+      const htmlContent = document.documentElement.outerHTML;
+      const lines = htmlContent.split("\n");
+
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        if (line.includes(target.outerHTML)) {
+          lineCount = i + 1; // 1-based line number
+          columnCount = line.indexOf(target.outerHTML) + 1; // 1-based column number
+          break;
+        }
+      }
+
+      if (lineCount > 0) {
+        errorLocation = {
+          filename: window.location.pathname,
+          line: lineCount,
+          column: columnCount,
+        };
+      }
+    }
+  } catch (e) {
+    console.warn("Error while getting resource error location:", e);
+  }
+
+  // 创建错误日志
+  const errorLog = createErrorLog({
+    error,
+    message: error.message,
+    filename: errorLocation.filename,
+    lineno: errorLocation.line,
+    colno: errorLocation.column,
+    stack: error.stack,
+  });
+
+  // 设置错误类型和级别
   errorLog.meta.errorType = ErrorTypes.resource_error;
   errorLog.meta.level = ErrorLevels.warning;
 
   // 添加资源特定信息
   errorLog.error.resource = {
-    type: event.target.tagName.toLowerCase(),
-    url: event.target.src || event.target.href,
-    timing: event.target.timing?.toJSON(),
+    type: target.tagName.toLowerCase(),
+    url: resourceUrl,
+    element: {
+      tagName: target.tagName,
+      id: target.id || null,
+      className: target.className || null,
+      outerHTML: target.outerHTML,
+      size:
+        target instanceof HTMLImageElement
+          ? {
+              naturalWidth: target.naturalWidth,
+              naturalHeight: target.naturalHeight,
+            }
+          : null,
+    },
+    timing: target.timing?.toJSON(),
+    performance: {
+      loadTime: target.timing
+        ? target.timing.loadEventEnd - target.timing.fetchStart
+        : null,
+      timeToFirstByte: target.timing
+        ? target.timing.responseStart - target.timing.fetchStart
+        : null,
+      redirectTime: target.timing
+        ? target.timing.redirectEnd - target.timing.redirectStart
+        : null,
+    },
+    status:
+      target instanceof HTMLImageElement
+        ? {
+            complete: target.complete,
+            naturalWidth: target.naturalWidth,
+            naturalHeight: target.naturalHeight,
+          }
+        : null,
+    location: errorLocation, // 添加位置信息到资源对象中
   };
 
   console.log("Resource Error:", errorLog);
-  // TODO: 发送错误信息到服务器
+  tracker.send(errorLog);
 }
 
 // 处理Promise错误
@@ -219,15 +338,24 @@ function handleLifecycleEvent(event) {
 }
 
 // 初始化错误监听
-export function initErrorCapture() {
+export function initJsErrorCapture() {
   // 捕获JS运行时错误
   window.addEventListener(
     MonitorEvents.error,
     (event) => {
-      if (event.target === window || !event.target) {
-        handleRuntimeError(event);
-      } else {
+      // 检查是否是资源加载错误
+      if (
+        event.target instanceof HTMLElement &&
+        (event.target.tagName === "SCRIPT" ||
+          event.target.tagName === "LINK" ||
+          event.target.tagName === "IMG" ||
+          event.target.tagName === "VIDEO" ||
+          event.target.tagName === "AUDIO" ||
+          event.target.tagName === "SOURCE")
+      ) {
         handleResourceError(event);
+      } else {
+        handleRuntimeError(event);
       }
     },
     true
@@ -332,94 +460,4 @@ export function initErrorCapture() {
       console.warn("Unable to add error listener to iframe:", e);
     }
   });
-
-  // 监听 AJAX 错误
-  const originalXHRSend = XMLHttpRequest.prototype.send;
-  const originalXHROpen = XMLHttpRequest.prototype.open;
-
-  XMLHttpRequest.prototype.open = function (...args) {
-    this._url = args[1]; // 保存请求URL
-    this._method = args[0]; // 保存请求方法
-    originalXHROpen.apply(this, args);
-  };
-
-  XMLHttpRequest.prototype.send = function (...args) {
-    const startTime = Date.now();
-
-    // 监听 XHR 错误
-    this.addEventListener("error", (event) => {
-      const errorLog = createErrorLog(event);
-      errorLog.meta.errorType = ErrorTypes.ajax_error;
-      errorLog.meta.level = ErrorLevels.error;
-      errorLog.error.ajax = {
-        url: this._url,
-        method: this._method,
-        status: this.status,
-        statusText: this.statusText,
-        duration: Date.now() - startTime,
-        response: this.response,
-        requestData: args[0],
-      };
-      console.log("AJAX Error:", errorLog);
-      // TODO: 发送错误信息到服务器
-    });
-
-    // 监听 XHR 超时
-    this.addEventListener("timeout", (event) => {
-      const errorLog = createErrorLog(event);
-      errorLog.meta.errorType = ErrorTypes.timeout_error;
-      errorLog.meta.level = ErrorLevels.warning;
-      errorLog.error.ajax = {
-        url: this._url,
-        method: this._method,
-        timeout: this.timeout,
-        duration: Date.now() - startTime,
-      };
-      console.log("AJAX Timeout:", errorLog);
-      // TODO: 发送错误信息到服务器
-    });
-
-    originalXHRSend.apply(this, args);
-  };
-
-  // 监听 Fetch 错误
-  const originalFetch = window.fetch;
-  window.fetch = async function (...args) {
-    const startTime = Date.now();
-    const request = args[0] instanceof Request ? args[0] : new Request(...args);
-
-    try {
-      const response = await originalFetch.apply(this, args);
-      if (!response.ok) {
-        const errorLog = createErrorLog(
-          new Error(`HTTP error! status: ${response.status}`)
-        );
-        errorLog.meta.errorType = ErrorTypes.ajax_error;
-        errorLog.meta.level = ErrorLevels.error;
-        errorLog.error.fetch = {
-          url: request.url,
-          method: request.method,
-          status: response.status,
-          statusText: response.statusText,
-          duration: Date.now() - startTime,
-        };
-        console.log("Fetch Error:", errorLog);
-        // TODO: 发送错误信息到服务器
-      }
-      return response;
-    } catch (error) {
-      const errorLog = createErrorLog(error);
-      errorLog.meta.errorType = ErrorTypes.ajax_error;
-      errorLog.meta.level = ErrorLevels.error;
-      errorLog.error.fetch = {
-        url: request.url,
-        method: request.method,
-        duration: Date.now() - startTime,
-        error: error.message,
-      };
-      console.log("Fetch Error:", errorLog);
-      // TODO: 发送错误信息到服务器
-      throw error; // 继续抛出错误，保持原有行为
-    }
-  };
 }

@@ -1,4 +1,4 @@
-import { ErrorTypes, ErrorLevels } from "../constants/index.js";
+import { ErrorTypes, ErrorLevels } from "../constant/index.js";
 import { formatError, simplifyUrl, formatTime } from "./handleErrorStack.js";
 import { getLastEvent, getLastEventPath } from "./getEvents.js";
 

@@ -1,4 +1,4 @@
-import { ErrorTypes, ErrorLevels, MonitorEvents } from "../constant/index.js";
+import { ErrorTypes, ErrorLevels, MonitorEvents } from "../constants/index.js";
 
 // 获取具体的错误类型
 export function getDetailedErrorType(error) {

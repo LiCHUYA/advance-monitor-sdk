@@ -1,4 +1,4 @@
-import { ErrorTypes } from "../constant/index.js";
+import { ErrorTypes } from "../constants/index.js";
 
 /**
  * 处理错误堆栈信息，将其转换为更易读的格式

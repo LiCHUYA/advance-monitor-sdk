@@ -2,6 +2,14 @@ import { defineConfig } from "vite";
 import { resolve } from "path";
 
 export default defineConfig({
+  server: {
+    port: 3000,
+    before: (app) => {
+      app.use("/api", (req, res) => {
+        res.send("Hello World");
+      });
+    },
+  },
   build: {
     lib: {
       entry: resolve(__dirname, "src/index.js"),

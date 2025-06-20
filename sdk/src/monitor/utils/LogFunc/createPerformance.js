@@ -1,4 +1,4 @@
-import { ErrorTypes, ErrorLevels } from "../constants/index.js";
+import { ErrorTypes, ErrorLevels } from "../constant/index.js";
 import { formatError, simplifyUrl, formatTime } from "./handleErrorStack.js";
 import { getLastEvent, getLastEventPath } from "./getEvents.js";
 
@@ -279,6 +279,81 @@ export function createErrorLog(event) {
             // 示例：用户会员等级
             vipLevel: 2,
           },
+        }
+      : null,
+  };
+}
+
+/**
+ * 创建性能监控日志
+ * @param {Object} metrics - 性能指标数据
+ * @param {Object} options - 额外的性能信息
+ */
+export function createPerformanceLog(metrics, options = {}) {
+  return {
+    meta: {
+      kind: "performance",
+      type: options.type || "timing",
+      timestamp: formatTime(new Date().getTime()),
+    },
+
+    performance: {
+      // 页面加载性能
+      timing: {
+        // 导航时间
+        navigationTiming: {
+          navigationStart: metrics.navigationStart,
+          loadEventEnd: metrics.loadEventEnd,
+          domContentLoadedEventEnd: metrics.domContentLoadedEventEnd,
+          redirectCount: performance.navigation?.redirectCount,
+          type: performance.navigation?.type,
+        },
+        // 关键时间点
+        timing: {
+          dns: metrics.domainLookupEnd - metrics.domainLookupStart,
+          tcp: metrics.connectEnd - metrics.connectStart,
+          ssl:
+            metrics.secureConnectionStart > 0
+              ? metrics.connectEnd - metrics.secureConnectionStart
+              : 0,
+          ttfb: metrics.responseStart - metrics.requestStart,
+          trans: metrics.responseEnd - metrics.responseStart,
+          dom: metrics.domInteractive - metrics.responseEnd,
+          res: metrics.loadEventStart - metrics.domContentLoadedEventEnd,
+        },
+      },
+
+      // 资源加载性能
+      resource: options.resources?.map((item) => ({
+        name: item.name,
+        type: item.initiatorType,
+        duration: item.duration,
+        size: item.transferSize,
+        protocol: item.nextHopProtocol,
+      })),
+
+      // 内存使用情况
+      memory: {
+        jsHeapSizeLimit: performance.memory?.jsHeapSizeLimit,
+        totalJSHeapSize: performance.memory?.totalJSHeapSize,
+        usedJSHeapSize: performance.memory?.usedJSHeapSize,
+      },
+    },
+
+    page: {
+      url: window.location.pathname + window.location.search,
+      title: document.title,
+    },
+
+    network: {
+      type: navigator.connection?.effectiveType || "unknown",
+      rtt: navigator.connection?.rtt || 0,
+    },
+
+    biz: window.trackConfig?.enableBizFields
+      ? {
+          module: window.trackConfig?.module,
+          customData: window.trackConfig?.customData,
         }
       : null,
   };

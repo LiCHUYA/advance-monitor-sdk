@@ -1,4 +1,4 @@
-import { ErrorTypes, ErrorLevels } from "../constants/index.js";
+import { ErrorTypes, ErrorLevels } from "../constant/index.js";
 import { formatError, simplifyUrl, formatTime } from "./handleErrorStack.js";
 import { getLastEvent, getLastEventPath } from "./getEvents.js";
 
@@ -279,6 +279,62 @@ export function createErrorLog(event) {
             // 示例：用户会员等级
             vipLevel: 2,
           },
+        }
+      : null,
+  };
+}
+
+/**
+ * 创建用户行为日志
+ * @param {Object} event - 行为事件对象
+ * @param {Object} options - 额外的行为信息
+ */
+export function createBehaviorLog(event, options = {}) {
+  return {
+    meta: {
+      kind: "behavior",
+      type: options.type || "click",
+      timestamp: formatTime(new Date().getTime()),
+    },
+
+    behavior: {
+      type: event.type,
+      target: {
+        tagName: event.target?.tagName?.toLowerCase(),
+        className: event.target?.className,
+        id: event.target?.id,
+        innerText: event.target?.innerText?.slice(0, 50), // 限制文本长度
+        href: event.target?.href,
+        src: event.target?.src,
+      },
+      path: Array.from(event.path || []).map((node) => ({
+        tagName: node.tagName?.toLowerCase(),
+        className: node.className,
+        id: node.id,
+      })),
+      timestamp: event.timeStamp,
+      position: {
+        x: event.clientX,
+        y: event.clientY,
+        scrollX: window.scrollX,
+        scrollY: window.scrollY,
+      },
+    },
+
+    page: {
+      url: window.location.pathname + window.location.search,
+      title: document.title,
+    },
+
+    network: {
+      type: navigator.connection?.effectiveType || "unknown",
+      rtt: navigator.connection?.rtt || 0,
+    },
+
+    biz: window.trackConfig?.enableBizFields
+      ? {
+          module: window.trackConfig?.module,
+          customData: window.trackConfig?.customData,
         }
       : null,
   };

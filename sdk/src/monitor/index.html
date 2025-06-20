@@ -13,6 +13,9 @@
     <button onclick="promiseErrorObj()">触发promise错误 对象</button>
     <img src="https://www.baidu.com" alt="test" />
 
+    <hr />
+    <button onclick="xhrSuccess()">成功请求</button>
+    <button onclick="xhrError2()">触发xhr错误2</button>
     <script src="../../dist/monitor-sdk.es.js"></script>
     <script>
       function jsError(e) {
@@ -29,6 +32,18 @@
       function promiseErrorObj() {
         new Promise((resolve, reject) => {
           console.log(a.b);
+        });
+      }
+
+      // api错误
+      function xhrSuccess() {
+        fetch("http://localhost:3000/api/success", {
+          method: "GET",
+        });
+      }
+      function xhrError2() {
+        fetch("http://localhost:3000/api/404", {
+          method: "GET",
         });
       }
     </script>
