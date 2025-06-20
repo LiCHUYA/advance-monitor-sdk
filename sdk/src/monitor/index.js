@@ -1,4 +1,9 @@
-import { initJsErrorCapture, initXhrErrorCapture } from "./lib";
+import {
+  initJsErrorCapture,
+  initXhrErrorCapture,
+  initBlankScreen,
+} from "./lib";
 
 initJsErrorCapture();
 initXhrErrorCapture();
+initBlankScreen();

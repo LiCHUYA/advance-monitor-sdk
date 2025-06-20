@@ -10,6 +10,7 @@ export const ErrorTypes = {
   console_error: "consoleError", // console.error错误
   iframe_error: "iframeError", // iframe错误
   script_error: "scriptError", // 跨域脚本错误
+  blank_error: "blankError", // 白屏错误
 
   // 原生JavaScript错误类型
   syntax_error: "SyntaxError", // 语法错误

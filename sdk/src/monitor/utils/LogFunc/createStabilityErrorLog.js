@@ -1,8 +1,15 @@
-import { ErrorTypes, ErrorLevels } from "../constant/index.js";
-import { formatError, simplifyUrl, formatTime } from "./handleErrorStack.js";
-import { getLastEvent, getLastEventPath } from "./getEvents.js";
+import { ErrorTypes, ErrorLevels } from "../../constants/index.js";
+import {
+  formatError,
+  simplifyUrl,
+  formatTime,
+} from "../../utils/handleErrorStack.js";
+import { getLastEvent, getLastEventPath } from "../../utils/getEvents.js";
 
-export function createErrorLog(event) {
+export function createStabilityErrorLog(
+  event,
+  errorType = ErrorTypes.js_error
+) {
   const lastEvent = getLastEvent();
   return {
     // ==================== 1. 元信息层 ====================
@@ -28,8 +35,9 @@ export function createErrorLog(event) {
        * - jsError: JS执行错误
        * - promiseError: Promise未捕获错误
        * - resourceError: 资源加载错误
+       * - blankError: 白屏错误
        */
-      errorType: ErrorTypes.js_error,
+      errorType: errorType,
 
       /**
        * 日志记录时间戳（毫秒）

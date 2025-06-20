@@ -1,5 +1,5 @@
 import { ErrorTypes, ErrorLevels, MonitorEvents } from "../constants";
-import { createErrorLog } from "../utils/createErrorLog.js";
+import { createStabilityErrorLog } from "../utils/LogFunc/createStabilityErrorLog.js";
 import { getDetailedErrorType, getErrorLevel } from "../utils/index.js";
 import tracker from "../utils/traker.js";
 
@@ -30,7 +30,7 @@ Promise.reject = function (reason) {
 
 // 处理JS运行时错误
 function handleRuntimeError(event) {
-  const errorLog = createErrorLog(event);
+  const errorLog = createStabilityErrorLog(event);
 
   // 获取详细的错误类型
   const detailedErrorType = getDetailedErrorType(event.error);
@@ -125,7 +125,7 @@ function handleResourceError(event) {
   }
 
   // 创建错误日志
-  const errorLog = createErrorLog({
+  const errorLog = createStabilityErrorLog({
     error,
     message: error.message,
     filename: errorLocation.filename,
@@ -214,7 +214,7 @@ function handlePromiseError(event) {
     }
 
     // 创建错误日志
-    const errorLog = createErrorLog({
+    const errorLog = createStabilityErrorLog({
       error: reason,
       message: reason.message,
       filename: errorLocation?.filename || "",
@@ -264,7 +264,7 @@ function handlePromiseError(event) {
   }
 
   // 创建错误日志
-  const errorLog = createErrorLog({
+  const errorLog = createStabilityErrorLog({
     error:
       originalReason instanceof Error
         ? originalReason
@@ -305,7 +305,7 @@ function handlePromiseError(event) {
 // 处理console.error
 function handleConsoleError(...args) {
   const error = args[0] instanceof Error ? args[0] : new Error(args.join(" "));
-  const errorLog = createErrorLog({ error });
+  const errorLog = createStabilityErrorLog({ error });
 
   // 获取详细的错误类型
   const detailedErrorType = getDetailedErrorType(error);
@@ -398,7 +398,7 @@ export function initJsErrorCapture() {
   // 如果使用了框架，添加框架特定的错误处理
   if (window.Vue) {
     window.Vue.config.errorHandler = (error, vm, info) => {
-      const errorLog = createErrorLog({ error });
+      const errorLog = createStabilityErrorLog({ error });
 
       // 获取详细的错误类型
       const detailedErrorType = getDetailedErrorType(error);
@@ -419,7 +419,7 @@ export function initJsErrorCapture() {
   // React错误边界处理示例
   // 需要在React组件中实现componentDidCatch或static getDerivedStateFromError
   window._handleReactError = (error, errorInfo) => {
-    const errorLog = createErrorLog({ error });
+    const errorLog = createStabilityErrorLog({ error });
 
     // 获取详细的错误类型
     const detailedErrorType = getDetailedErrorType(error);
@@ -442,7 +442,7 @@ export function initJsErrorCapture() {
         MonitorEvents.error,
         (event) => {
           event.preventDefault();
-          const errorLog = createErrorLog(event);
+          const errorLog = createStabilityErrorLog(event);
           errorLog.meta.errorType = ErrorTypes.iframe_error;
           errorLog.meta.level = ErrorLevels.error;
           errorLog.error.iframe = {
