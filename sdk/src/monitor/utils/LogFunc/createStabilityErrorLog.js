@@ -8,7 +8,7 @@ import { getLastEvent, getLastEventPath } from "../../utils/getEvents.js";
 
 export function createStabilityErrorLog(
   event,
-  errorType = ErrorTypes.js_error
+  { kind = "stability", errorType = ErrorTypes.js_error } = {}
 ) {
   const lastEvent = getLastEvent();
   return {
@@ -20,7 +20,7 @@ export function createStabilityErrorLog(
        * - performance: 性能监控
        * - behavior: 用户行为监控
        */
-      kind: "stability",
+      kind,
 
       /**
        * 日志类型
