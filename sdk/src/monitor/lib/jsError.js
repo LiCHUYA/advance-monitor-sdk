@@ -1,97 +1,32 @@
 import { ErrorTypes, ErrorLevels, MonitorEvents } from "../constant/index.js";
-import { getErrorContext } from "../utils/getEvents.js";
 import { createErrorLog } from "../utils/createErrorLog.js";
-
+import { getDetailedErrorType, getErrorLevel } from "../utils/index.js";
 import tracker from "../utils/traker.js";
 
-// 获取具体的错误类型
-function getDetailedErrorType(error) {
-  if (!error) return ErrorTypes.unknown_error;
+// 保存原始的Promise.reject方法
+const originalReject = Promise.reject;
 
-  // 处理原生错误类型
-  switch (error.constructor.name) {
-    case "SyntaxError":
-      return ErrorTypes.syntax_error;
-    case "ReferenceError":
-      return ErrorTypes.reference_error;
-    case "TypeError":
-      return ErrorTypes.type_error;
-    case "RangeError":
-      return ErrorTypes.range_error;
-    case "EvalError":
-      return ErrorTypes.eval_error;
-    case "InternalError":
-      return ErrorTypes.internal_error;
-    case "URIError":
-      return ErrorTypes.uri_error;
-    case "AggregateError":
-      return ErrorTypes.aggregate_error;
-    default:
-      // 处理自定义错误类型
-      if (
-        error.name === "NetworkError" ||
-        error.message.toLowerCase().includes("network")
-      )
-        return ErrorTypes.network_error;
-      if (
-        error.name === "TimeoutError" ||
-        error.message.toLowerCase().includes("timeout")
-      )
-        return ErrorTypes.timeout_error;
-      if (
-        error.name === "ValidationError" ||
-        error.message.toLowerCase().includes("validation")
-      )
-        return ErrorTypes.validation_error;
-      if (
-        error.name === "BusinessError" ||
-        error.message.toLowerCase().includes("business")
-      )
-        return ErrorTypes.business_error;
-      if (
-        error.name === "MemoryError" ||
-        error.message.toLowerCase().includes("memory") ||
-        (error instanceof Error &&
-          error.message.toLowerCase().includes("out of memory"))
-      )
-        return ErrorTypes.memory_error;
-      // 检查是否是iframe错误
-      if (
-        error.target instanceof HTMLIFrameElement ||
-        (error.message && error.message.toLowerCase().includes("iframe"))
-      )
-        return ErrorTypes.iframe_error;
-      return ErrorTypes.js_error;
-  }
-}
+// 重写Promise.reject，以捕获错误位置
+Promise.reject = function (reason) {
+  const locationError = new Error();
+  Error.captureStackTrace(locationError);
 
-// 获取错误等级
-function getErrorLevel(errorType) {
-  // 致命错误
-  if (
-    [
-      ErrorTypes.internal_error,
-      ErrorTypes.memory_error,
-      ErrorTypes.aggregate_error,
-    ].includes(errorType)
-  ) {
-    return ErrorLevels.fatal;
+  // 如果reason是Error实例，保留其信息
+  if (reason instanceof Error) {
+    reason._originalStack = reason.stack;
   }
 
-  // 警告级别
-  if (
-    [
-      ErrorTypes.resource_error,
-      ErrorTypes.network_error,
-      ErrorTypes.timeout_error,
-    ].includes(errorType)
-  ) {
-    return ErrorLevels.warning;
-  }
+  // 添加位置信息到reason
+  reason = {
+    detail: reason,
+    __location: {
+      stack: locationError.stack,
+      timestamp: Date.now(),
+    },
+  };
 
-  // 默认为error级别
-  return ErrorLevels.error;
-}
+  return originalReject.call(this, reason);
+};
 
 // 处理JS运行时错误
 function handleRuntimeError(event) {
@@ -130,16 +65,70 @@ function handleResourceError(event) {
 
 // 处理Promise错误
 function handlePromiseError(event) {
-  event.preventDefault();
-  const errorLog = createErrorLog(event);
+  let reason = event.reason;
+  let errorLocation = null;
+  let originalReason = reason?.detail || reason;
+  let locationStack = reason?.__location?.stack;
+
+  // 如果有位置信息，解析它
+  if (locationStack) {
+    const stackLines = locationStack.split("\n");
+    // 查找调用Promise.reject的位置
+    for (const line of stackLines) {
+      if (!line.includes("Promise.reject")) {
+        const matches =
+          line.match(/at\s+(.+):(\d+):(\d+)/) ||
+          line.match(/\((.+):(\d+):(\d+)\)/);
+        if (matches) {
+          errorLocation = {
+            filename: matches[1],
+            line: parseInt(matches[2], 10),
+            column: parseInt(matches[3], 10),
+          };
+          break;
+        }
+      }
+    }
+  }
+
+  // 创建错误日志
+  const errorLog = createErrorLog({
+    error:
+      originalReason instanceof Error
+        ? originalReason
+        : new Error(String(originalReason)),
+    message:
+      originalReason instanceof Error
+        ? originalReason.message
+        : String(originalReason),
+    filename: errorLocation?.filename || "",
+    lineno: errorLocation?.line || 0,
+    colno: errorLocation?.column || 0,
+    stack:
+      originalReason instanceof Error
+        ? originalReason._originalStack || originalReason.stack
+        : locationStack,
+  });
 
   // 获取详细的错误类型
-  const detailedErrorType = getDetailedErrorType(event.reason);
+  const detailedErrorType = getDetailedErrorType(originalReason);
   errorLog.meta.errorType = detailedErrorType;
   errorLog.meta.level = getErrorLevel(detailedErrorType);
 
+  // 添加Promise特定信息
+  errorLog.error.promise = {
+    type: event.type,
+    reason:
+      typeof originalReason === "object"
+        ? JSON.stringify(originalReason)
+        : String(originalReason),
+    location: errorLocation || {},
+    timestamp: reason?.__location?.timestamp,
+  };
+
   console.log("Promise Error:", errorLog);
-  // TODO: 发送错误信息到服务器
+
+  tracker.send(errorLog);
 }
 
 // 处理console.error
