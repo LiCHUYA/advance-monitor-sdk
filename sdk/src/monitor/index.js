@@ -1,11 +1,6 @@
-import {
-  initJsErrorCapture,
-  initXhrErrorCapture,
-  initBlankScreen,
-  initTimingMonitor,
-} from "./lib";
-
-initJsErrorCapture();
-initXhrErrorCapture();
-initBlankScreen();
-initTimingMonitor();
+export * from "./lib/jsError";
+export * from "./lib/xhrError";
+export * from "./lib/blankScreen";
+export * from "./lib/timing";
+export * from "./lib/uv-pv";
+export * from "./lib/behavior";
