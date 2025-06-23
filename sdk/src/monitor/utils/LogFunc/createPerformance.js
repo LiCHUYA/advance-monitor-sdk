@@ -291,12 +291,31 @@ export function createErrorLog(event) {
  */
 export function createPerformanceLog(metrics, options = {}) {
   return {
+    // ==================== 1. 元信息层 ====================
     meta: {
+      /**
+       * 监控指标大类
+       * - stability: 稳定性监控（错误、崩溃等）
+       * - performance: 性能监控
+       * - behavior: 用户行为监控
+       */
       kind: "performance",
-      type: options.type || "timing",
+
+      /**
+       * 日志类型
+       * - error: 错误日志
+       * - warning: 警告日志
+       * - info: 信息日志
+       */
+      type: options.type || "info",
+
+      /**
+       * 日志记录时间戳（毫秒）
+       */
       timestamp: formatTime(new Date().getTime()),
     },
 
+    // ==================== 2. 性能信息层 ====================
     performance: {
       // 页面加载性能
       timing: {
@@ -308,8 +327,9 @@ export function createPerformanceLog(metrics, options = {}) {
           redirectCount: performance.navigation?.redirectCount,
           type: performance.navigation?.type,
         },
+
         // 关键时间点
-        timing: {
+        keyMetrics: {
           dns: metrics.domainLookupEnd - metrics.domainLookupStart,
           tcp: metrics.connectEnd - metrics.connectStart,
           ssl:
@@ -324,13 +344,14 @@ export function createPerformanceLog(metrics, options = {}) {
       },
 
       // 资源加载性能
-      resource: options.resources?.map((item) => ({
-        name: item.name,
-        type: item.initiatorType,
-        duration: item.duration,
-        size: item.transferSize,
-        protocol: item.nextHopProtocol,
-      })),
+      resources:
+        options.resources?.map((item) => ({
+          name: item.name,
+          type: item.initiatorType,
+          duration: item.duration,
+          size: item.transferSize,
+          protocol: item.nextHopProtocol,
+        })) || [],
 
       // 内存使用情况
       memory: {
@@ -338,22 +359,135 @@ export function createPerformanceLog(metrics, options = {}) {
         totalJSHeapSize: performance.memory?.totalJSHeapSize,
         usedJSHeapSize: performance.memory?.usedJSHeapSize,
       },
+
+      // 首次渲染时间
+      paint: {
+        fcp: performance.getEntriesByName("first-contentful-paint")?.[0]
+          ?.startTime,
+        lcp: performance.getEntriesByName("largest-contentful-paint")?.[0]
+          ?.startTime,
+      },
+
+      // 交互性能
+      interaction: {
+        fid: performance.getEntriesByName("first-input-delay")?.[0]?.duration,
+        tti: performance.getEntriesByName("time-to-interactive")?.[0]
+          ?.startTime,
+      },
     },
 
+    // ==================== 3. 页面环境层 ====================
     page: {
-      url: window.location.pathname + window.location.search,
+      /**
+       * 当前页面完整URL
+       */
+      url: simplifyUrl(window.location.href),
+
+      /**
+       * 页面标题
+       */
       title: document.title,
+
+      /**
+       * 页面来源
+       */
+      referrer: simplifyUrl(document.referrer),
+
+      /**
+       * 页面加载耗时
+       */
+      loadTime:
+        performance.timing?.loadEventStart -
+        performance.timing?.navigationStart,
+
+      // 视口信息
+      viewport: {
+        screen: `${window.screen.width}x${window.screen.height}`,
+        window: `${window.innerWidth}x${window.innerHeight}`,
+        scroll: `${window.scrollX},${window.scrollY}`,
+      },
+
+      /**
+       * 页面可见性状态
+       */
+      visibility: document.visibilityState,
     },
 
+    // ==================== 4. 设备层 ====================
+    device: {
+      /**
+       * 操作系统类型
+       */
+      os: navigator.platform,
+
+      /**
+       * 设备类型
+       */
+      type: /Mobile|Tablet/.test(navigator.userAgent) ? "mobile" : "desktop",
+
+      /**
+       * 设备型号
+       */
+      model: (() => {
+        const ua = navigator.userAgent;
+        if (/iPhone/.test(ua)) return "iPhone";
+        if (/iPad/.test(ua)) return "iPad";
+        if (/Android/.test(ua)) return "Android";
+        return "unknown";
+      })(),
+    },
+
+    // ==================== 5. 浏览器层 ====================
+    browser: {
+      /**
+       * 完整UserAgent字符串
+       */
+      ua: navigator.userAgent,
+
+      /**
+       * 浏览器渲染引擎
+       */
+      engine: navigator.userAgent.match(/(WebKit|Gecko|Blink)/)?.[0],
+
+      /**
+       * 浏览器主版本号
+       */
+      version: navigator.userAgent.match(
+        /(Chrome|Firefox|Safari|Edge)\/(\d+)/
+      )?.[2],
+
+      /**
+       * 浏览器语言
+       */
+      language: navigator.language,
+    },
+
+    // ==================== 6. 网络层 ====================
     network: {
+      /**
+       * 网络连接类型
+       */
       type: navigator.connection?.effectiveType || "unknown",
+
+      /**
+       * 网络往返时延（毫秒）
+       */
       rtt: navigator.connection?.rtt || 0,
+
+      /**
+       * 预估下行速度（Mbps）
+       */
+      downlink: navigator.connection?.downlink || 0,
     },
 
+    // ==================== 7. 业务层 ====================
     biz: window.trackConfig?.enableBizFields
       ? {
           module: window.trackConfig?.module,
-          customData: window.trackConfig?.customData,
+          customData: {
+            ...window.trackConfig?.customData,
+            ...options.context,
+          },
         }
       : null,
   };

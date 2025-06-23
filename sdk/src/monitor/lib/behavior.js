@@ -1,5 +1,8 @@
 import tracker from "../utils/traker.js";
 import { getVisitorId, getSessionId } from "./uv-pv.js";
+import { createBehaviorLog } from "../utils/LogFunc/createBehavior.js";
+import { throttle } from "../utils/throttle.js";
+import { isElementInViewport } from "../utils/viewport.js";
 
 // 状态管理
 const state = {
@@ -41,34 +44,48 @@ function getElementTrackData(element) {
 
 // 追踪点击事件
 function trackClickEvent(elementInfo) {
-  tracker.send({
-    kind: "behavior",
+  const event = {
     type: "click",
-    visitorId: getVisitorId(),
-    sessionId: getSessionId(),
-    timestamp: Date.now(),
-    page: {
-      title: document.title,
-      url: location.href,
+    target: elementInfo,
+    timeStamp: Date.now(),
+    clientX: elementInfo.position?.x,
+    clientY: elementInfo.position?.y,
+    path: elementInfo.path,
+  };
+
+  const log = createBehaviorLog(event, {
+    type: "click",
+    context: {
+      visitorId: getVisitorId(),
+      sessionId: getSessionId(),
     },
-    element: elementInfo,
   });
+
+  tracker.send(log);
 }
 
 // 追踪曝光事件
 function trackExposureEvent(exposureInfo) {
-  tracker.send({
-    kind: "behavior",
+  const event = {
     type: "exposure",
-    visitorId: getVisitorId(),
-    sessionId: getSessionId(),
-    timestamp: Date.now(),
-    page: {
-      title: document.title,
-      url: location.href,
+    target: exposureInfo.element,
+    timeStamp: Date.now(),
+    path: exposureInfo.path,
+  };
+
+  const log = createBehaviorLog(event, {
+    type: "exposure",
+    context: {
+      visitorId: getVisitorId(),
+      sessionId: getSessionId(),
+      exposureDetails: {
+        duration: exposureInfo.duration,
+        visiblePercentage: exposureInfo.visiblePercentage,
+      },
     },
-    exposure: exposureInfo,
   });
+
+  tracker.send(log);
 }
 
 // 初始化点击事件追踪
@@ -225,21 +242,24 @@ function init() {
 
 // 手动埋点方法
 export function track(eventName, eventData = {}) {
-  tracker.send({
-    kind: "behavior",
+  const event = {
     type: "custom",
-    visitorId: getVisitorId(),
-    sessionId: getSessionId(),
-    timestamp: Date.now(),
-    page: {
-      title: document.title,
-      url: location.href,
-    },
-    event: {
+    target: {
       name: eventName,
       data: eventData,
     },
+    timeStamp: Date.now(),
+  };
+
+  const log = createBehaviorLog(event, {
+    type: "custom",
+    context: {
+      visitorId: getVisitorId(),
+      sessionId: getSessionId(),
+    },
   });
+
+  tracker.send(log);
 }
 
 // 初始化行为追踪
