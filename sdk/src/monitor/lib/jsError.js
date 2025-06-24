@@ -1,4 +1,4 @@
-import { ErrorTypes, ErrorLevels, MonitorEvents } from "../constants";
+import { ErrorTypes, ErrorLevels, MonitorEvents } from "../constants/index.js";
 import { createStabilityErrorLog } from "../utils/LogFunc/createStabilityErrorLog.js";
 import { getDetailedErrorType, getErrorLevel } from "../utils/index.js";
 import tracker from "../utils/traker.js";
@@ -8,12 +8,23 @@ const originalReject = Promise.reject;
 
 // 重写Promise.reject，以捕获错误位置
 Promise.reject = function (reason) {
+  // 创建一个错误对象来捕获当前的堆栈
   const locationError = new Error();
   Error.captureStackTrace(locationError);
 
   // 如果reason是Error实例，保留其信息
   if (reason instanceof Error) {
     reason._originalStack = reason.stack;
+  }
+  // 如果reason是字符串或其他类型，创建一个Error对象
+  else {
+    const errorWithStack = new Error(String(reason));
+    Error.captureStackTrace(errorWithStack);
+    reason = {
+      message: String(reason),
+      stack: errorWithStack.stack,
+      _isCustomError: true,
+    };
   }
 
   // 添加位置信息到reason
@@ -29,8 +40,40 @@ Promise.reject = function (reason) {
 };
 
 // 处理JS运行时错误
-function handleRuntimeError(event) {
-  const errorLog = createStabilityErrorLog(event);
+async function handleRuntimeError(event) {
+  let errorLocation = {
+    filename: event.filename || window.location.pathname,
+    line: event.lineno || 0,
+    column: event.colno || 0,
+  };
+
+  try {
+    // 使用sourcemap转换错误位置
+    const { parseErrorStack } = await import("./sourcemap.js");
+    const parsedError = await parseErrorStack(event.error, {
+      url: window.trackConfig?.sourceMapUrl,
+    });
+
+    if (parsedError.stack?.[0]) {
+      errorLocation = {
+        filename: parsedError.stack[0].fileName || errorLocation.filename,
+        line: parsedError.stack[0].line || errorLocation.line,
+        column: parsedError.stack[0].column || errorLocation.column,
+      };
+    }
+  } catch (err) {
+    console.warn("解析错误位置失败:", err);
+  }
+
+  const errorLog = createStabilityErrorLog({
+    error: event.error,
+    message:
+      event.message || (event.error && event.error.message) || "未知错误",
+    filename: errorLocation.filename,
+    lineno: errorLocation.line,
+    colno: errorLocation.column,
+    stack: event.error?.stack,
+  });
 
   // 获取详细的错误类型
   const detailedErrorType = getDetailedErrorType(event.error);
@@ -42,7 +85,7 @@ function handleRuntimeError(event) {
     errorLog.meta.errorType = ErrorTypes.script_error;
   }
 
-  console.log("Error Log:", errorLog);
+  console.log("错误日志:", errorLog);
   tracker.send(errorLog);
 }
 
@@ -183,79 +226,102 @@ function handleResourceError(event) {
 }
 
 // 处理Promise错误
-function handlePromiseError(event) {
-  console.log("event", event);
+async function handlePromiseError(event) {
   let reason = event.reason;
-  let errorLocation = null;
+  let errorLocation = {
+    filename: window.location.pathname,
+    line: 0,
+    column: 0,
+  };
   let originalReason = reason?.detail || reason;
   let locationStack = reason?.__location?.stack;
 
-  // 如果是Error实例（如ReferenceError等运行时错误）
-  if (reason instanceof Error) {
-    const stackLines = reason.stack.split("\n");
-    // 查找第一个非Promise内部的调用位置
+  try {
+    const { parseErrorStack } = await import("./sourcemap.js");
+
+    // 1. 如果是Error实例或自定义错误对象
+    if (originalReason instanceof Error || originalReason?._isCustomError) {
+      const errorToUse =
+        originalReason instanceof Error ? originalReason : new Error();
+      errorToUse.stack = originalReason.stack || errorToUse.stack;
+
+      const parsedError = await parseErrorStack(errorToUse, {
+        url: window.trackConfig?.sourceMapUrl,
+      });
+
+      if (parsedError.stack?.[0]) {
+        errorLocation = {
+          filename: parsedError.stack[0].fileName || errorLocation.filename,
+          line: parsedError.stack[0].line || errorLocation.line,
+          column: parsedError.stack[0].column || errorLocation.column,
+        };
+      }
+    }
+    // 2. 如果是通过Promise.reject抛出的错误
+    else if (locationStack) {
+      const locationError = new Error();
+      locationError.stack = locationStack;
+      const parsedLocation = await parseErrorStack(locationError, {
+        url: window.trackConfig?.sourceMapUrl,
+      });
+
+      // 查找第一个非SDK内部的堆栈帧
+      const nonSdkFrame = parsedLocation.stack?.find(
+        (frame) =>
+          !frame.fileName?.includes("monitor-sdk.es.js") &&
+          !frame.fileName?.includes("node_modules")
+      );
+
+      if (nonSdkFrame) {
+        errorLocation = {
+          filename: nonSdkFrame.fileName || errorLocation.filename,
+          line: nonSdkFrame.line || errorLocation.line,
+          column: nonSdkFrame.column || errorLocation.column,
+        };
+      }
+    }
+
+    // 3. 如果上面都没有获取到位置信息，尝试从当前错误堆栈获取
+    if (errorLocation.line === 0 && errorLocation.column === 0) {
+      const currentError = new Error();
+      Error.captureStackTrace(currentError);
+      const parsedCurrentLocation = await parseErrorStack(currentError, {
+        url: window.trackConfig?.sourceMapUrl,
+      });
+
+      // 查找第一个非SDK内部的堆栈帧
+      const nonSdkFrame = parsedCurrentLocation.stack?.find(
+        (frame) =>
+          !frame.fileName?.includes("monitor-sdk.es.js") &&
+          !frame.fileName?.includes("node_modules")
+      );
+
+      if (nonSdkFrame) {
+        errorLocation = {
+          filename: nonSdkFrame.fileName || errorLocation.filename,
+          line: nonSdkFrame.line || errorLocation.line,
+          column: nonSdkFrame.column || errorLocation.column,
+        };
+      }
+    }
+  } catch (err) {
+    console.warn("解析Promise错误位置失败:", err);
+    // 回退到原始错误位置解析逻辑
+    const stackToUse =
+      originalReason?.stack || locationStack || new Error().stack;
+    const stackLines = stackToUse.split("\n");
+
     for (const line of stackLines) {
       if (
-        !line.includes("Promise.reject") &&
-        !line.includes("new Promise (<anonymous>)")
+        !line.includes("monitor-sdk.es.js") &&
+        !line.includes("node_modules")
       ) {
-        const matches =
-          line.match(/at\s+(?:\w+\s+)?\(?(.+):(\d+):(\d+)\)?/) ||
-          line.match(/\((.+):(\d+):(\d+)\)/);
+        const matches = line.match(/at\s+(?:\w+\s+)?\(?(.+):(\d+):(\d+)\)?/);
         if (matches) {
           errorLocation = {
-            filename: matches[1],
-            line: parseInt(matches[2], 10),
-            column: parseInt(matches[3], 10),
-          };
-          break;
-        }
-      }
-    }
-
-    // 创建错误日志
-    const errorLog = createStabilityErrorLog({
-      error: reason,
-      message: reason.message,
-      filename: errorLocation?.filename || "",
-      lineno: errorLocation?.line || 0,
-      colno: errorLocation?.column || 0,
-      stack: reason.stack,
-    });
-
-    // 获取详细的错误类型
-    const detailedErrorType = getDetailedErrorType(reason);
-    errorLog.meta.errorType = detailedErrorType;
-    errorLog.meta.level = getErrorLevel(detailedErrorType);
-
-    // 添加Promise特定信息
-    errorLog.error.promise = {
-      type: event.type,
-      reason: reason.message,
-      location: errorLocation || {},
-      errorType: reason.name,
-      stack: reason.stack,
-    };
-
-    console.log("Promise Runtime Error:", errorLog);
-    tracker.send(errorLog);
-    return;
-  }
-
-  // 处理直接Promise.reject的情况
-  if (locationStack) {
-    const stackLines = locationStack.split("\n");
-    // 查找调用Promise.reject的位置
-    for (const line of stackLines) {
-      if (!line.includes("Promise.reject")) {
-        const matches =
-          line.match(/at\s+(.+):(\d+):(\d+)/) ||
-          line.match(/\((.+):(\d+):(\d+)\)/);
-        if (matches) {
-          errorLocation = {
-            filename: matches[1],
-            line: parseInt(matches[2], 10),
-            column: parseInt(matches[3], 10),
+            filename: matches[1] || errorLocation.filename,
+            line: parseInt(matches[2], 10) || errorLocation.line,
+            column: parseInt(matches[3], 10) || errorLocation.column,
           };
           break;
         }
@@ -263,7 +329,6 @@ function handlePromiseError(event) {
     }
   }
 
-  // 创建错误日志
   const errorLog = createStabilityErrorLog({
     error:
       originalReason instanceof Error
@@ -272,14 +337,14 @@ function handlePromiseError(event) {
     message:
       originalReason instanceof Error
         ? originalReason.message
+        : originalReason?._isCustomError
+        ? originalReason.message
         : String(originalReason),
-    filename: errorLocation?.filename || "",
-    lineno: errorLocation?.line || 0,
-    colno: errorLocation?.column || 0,
+    filename: errorLocation.filename,
+    lineno: errorLocation.line,
+    colno: errorLocation.column,
     stack:
-      originalReason instanceof Error
-        ? originalReason._originalStack || originalReason.stack
-        : locationStack,
+      originalReason instanceof Error ? originalReason.stack : locationStack,
   });
 
   // 获取详细的错误类型
@@ -294,11 +359,13 @@ function handlePromiseError(event) {
       typeof originalReason === "object"
         ? JSON.stringify(originalReason)
         : String(originalReason),
-    location: errorLocation || {},
+    location: errorLocation,
     timestamp: reason?.__location?.timestamp,
+    originalStack: reason?._originalStack, // 保存原始错误堆栈
+    isCustomError: originalReason?._isCustomError || false,
   };
 
-  console.log("Promise Rejection:", errorLog);
+  console.log("Promise错误:", errorLog);
   tracker.send(errorLog);
 }
 

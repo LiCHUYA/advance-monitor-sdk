@@ -42,42 +42,31 @@ export function initBlankScreen({
     return textCount >= textDomCount;
   }
 
-  // 检测白屏
   function checkBlankScreen() {
-    // 如果已经上报过，则不再检测
     if (hasReported) return;
 
-    // 确保DOM已经准备就绪
-    if (document.readyState === "loading") {
-      return;
-    }
-
-    emptyPoints = 0;
+    // 生成采样点
     const points = [];
+    const innerWidth = window.innerWidth;
+    const innerHeight = window.innerHeight;
 
-    // 检测水平方向的点
-    for (let i = 1; i <= 9; i++) {
-      const x = (window.innerWidth * i) / 10;
-      const y = window.innerHeight / 2;
-      const elements = document.elementsFromPoint(x, y);
-      points.push(elements);
-
-      if (!elements.length || elements.every(isWrapperElement)) {
-        emptyPoints++;
+    // 生成采样点坐标
+    for (let i = 1; i <= 4; i++) {
+      for (let j = 1; j <= 4; j++) {
+        const x = (innerWidth * i) / 5;
+        const y = (innerHeight * j) / 5;
+        points.push([x, y]);
       }
     }
 
-    // 检测垂直方向的点
-    for (let i = 1; i <= 9; i++) {
-      const x = window.innerWidth / 2;
-      const y = (window.innerHeight * i) / 10;
+    // 检测每个采样点
+    emptyPoints = 0;
+    points.forEach(([x, y]) => {
       const elements = document.elementsFromPoint(x, y);
-      points.push(elements);
-
       if (!elements.length || elements.every(isWrapperElement)) {
         emptyPoints++;
       }
-    }
+    });
 
     // 如果空白点过多且采样点没有足够的文本内容，判定为白屏
     if (emptyPoints >= emptyPointsLimit && !points.some(hasTextContent)) {
@@ -86,6 +75,9 @@ export function initBlankScreen({
         {
           message: "Screen is blank",
           error,
+          filename: window.location.pathname,
+          lineno: 0,
+          colno: 0,
           // 添加白屏特有的信息
           blankScreen: {
             emptyPoints,
@@ -99,14 +91,27 @@ export function initBlankScreen({
               domComplete: performance.timing?.domComplete,
               loadEventEnd: performance.timing?.loadEventEnd,
             },
+            // 添加采样点信息
+            samplingPoints: points.map(([x, y]) => ({
+              x,
+              y,
+              elements: document.elementsFromPoint(x, y).map((el) => ({
+                tagName: el.tagName.toLowerCase(),
+                id: el.id || null,
+                className: el.className || null,
+                hasContent: !!el.textContent?.trim(),
+                isWrapper: isWrapperElement(el),
+              })),
+            })),
           },
         },
-        ErrorTypes.blank_error
+        {
+          kind: "stability",
+          errorType: ErrorTypes.blank_error,
+        }
       );
 
-      // 发送错误日志
       tracker.send(errorLog);
-      console.log("白屏", errorLog);
       hasReported = true;
     }
   }

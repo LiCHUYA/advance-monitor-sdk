@@ -1,6 +1,6 @@
-import { ErrorTypes, ErrorLevels } from "../../constants";
-import { formatTime, simplifyUrl } from "../handleErrorStack";
-import now from "performance-now";
+import { ErrorTypes } from "../../constants/index.js";
+import { simplifyUrl } from "../handleErrorStack.js";
+import tracker from "../../utils/traker.js";
 
 /**
  * 检查请求是否成功
@@ -28,7 +28,7 @@ function formatDuration(time) {
  * @param {Error|null} [params.error] - 错误对象
  * @param {Object} [params.context] - 上下文信息
  */
-export function createApiLog(params) {
+export async function createApiLog(params) {
   const { request = {}, response = {}, error = null, context = {} } = params;
 
   // 判断请求是否成功
@@ -40,30 +40,13 @@ export function createApiLog(params) {
       ? formatDuration(response.endTime - request.startTime)
       : "0ms";
 
-  return {
+  const log = {
     // ==================== 1. 元信息层 ====================
     meta: {
-      /**
-       * 监控指标大类
-       * - stability: 稳定性监控（错误、崩溃等）
-       * - performance: 性能监控
-       * - behavior: 用户行为监控
-       * - api: API监控
-       */
-      kind: "api",
-
-      /**
-       * 日志类型
-       * - error: 错误日志
-       * - warning: 警告日志
-       * - info: 信息日志
-       */
-      type: success ? ErrorLevels.info : ErrorLevels.error,
-
-      /**
-       * 日志记录时间戳（毫秒）
-       */
-      timestamp: formatTime(now()),
+      kind: "stability",
+      type: success ? "api" : "error",
+      errorType: error ? ErrorTypes.ajax_error : undefined,
+      timestamp: Date.now(),
     },
 
     // ==================== 2. API信息层 ====================
@@ -104,37 +87,24 @@ export function createApiLog(params) {
 
     // ==================== 3. 页面环境层 ====================
     page: {
-      /**
-       * 当前页面完整URL
-       */
       url: simplifyUrl(window.location.href),
-
-      /**
-       * 页面标题
-       */
       title: document.title,
-
-      /**
-       * 页面来源
-       */
       referrer: simplifyUrl(document.referrer),
+      loadTime:
+        performance.timing?.loadEventStart -
+        performance.timing?.navigationStart,
+      viewport: {
+        screen: `${window.screen.width}x${window.screen.height}`,
+        window: `${window.innerWidth}x${window.innerHeight}`,
+        scroll: `${window.scrollX},${window.scrollY}`,
+      },
+      visibility: document.visibilityState,
     },
 
     // ==================== 4. 设备层 ====================
     device: {
-      /**
-       * 操作系统类型
-       */
       os: navigator.platform,
-
-      /**
-       * 设备类型
-       */
       type: /Mobile|Tablet/.test(navigator.userAgent) ? "mobile" : "desktop",
-
-      /**
-       * 设备型号
-       */
       model: (() => {
         const ua = navigator.userAgent;
         if (/iPhone/.test(ua)) return "iPhone";
@@ -146,44 +116,18 @@ export function createApiLog(params) {
 
     // ==================== 5. 浏览器层 ====================
     browser: {
-      /**
-       * 完整UserAgent字符串
-       */
       ua: navigator.userAgent,
-
-      /**
-       * 浏览器渲染引擎
-       */
       engine: navigator.userAgent.match(/(WebKit|Gecko|Blink)/)?.[0],
-
-      /**
-       * 浏览器主版本号
-       */
       version: navigator.userAgent.match(
         /(Chrome|Firefox|Safari|Edge)\/(\d+)/
       )?.[2],
-
-      /**
-       * 浏览器语言
-       */
       language: navigator.language,
     },
 
     // ==================== 6. 网络层 ====================
     network: {
-      /**
-       * 网络连接类型
-       */
       type: navigator.connection?.effectiveType || "unknown",
-
-      /**
-       * 网络往返时延（毫秒）
-       */
       rtt: navigator.connection?.rtt || 0,
-
-      /**
-       * 预估下行速度（Mbps）
-       */
       downlink: navigator.connection?.downlink || 0,
     },
 
@@ -198,4 +142,10 @@ export function createApiLog(params) {
         }
       : null,
   };
+
+  // 发送日志
+
+  console.log("logApi", log);
+
+  await tracker.send(log);
 }

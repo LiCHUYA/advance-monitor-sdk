@@ -79,3 +79,71 @@ export const MonitorEvents = {
   change: "change",
   submit: "submit",
 };
+
+// 行为类型
+export const BEHAVIOR_TYPES = {
+  CLICK: "click", // 点击事件
+  EXPOSURE: "exposure", // 曝光事件
+  CUSTOM: "custom", // 自定义事件
+  PAGE_VIEW: "page_view", // 页面访问
+  PAGE_LEAVE: "page_leave", // 页面离开
+  PAGE_HIDE: "page_hide", // 页面隐藏
+  PAGE_SHOW: "page_show", // 页面显示
+  ROUTE_CHANGE: "route_change", // 路由变化
+};
+
+// 性能指标评级规则（单位：毫秒）
+export const PERFORMANCE_RATING_RULES = {
+  // 首次内容绘制 (FCP)
+  FCP: {
+    good: 1800, // 0-1800ms 为好
+    needsImprovement: 3000, // 1800-3000ms 需要改进
+    // > 3000ms 为差
+  },
+
+  // 最大内容绘制 (LCP)
+  LCP: {
+    good: 2500, // 0-2500ms 为好
+    needsImprovement: 4000, // 2500-4000ms 需要改进
+    // > 4000ms 为差
+  },
+
+  // 首次输入延迟 (FID)
+  FID: {
+    good: 100, // 0-100ms 为好
+    needsImprovement: 300, // 100-300ms 需要改进
+    // > 300ms 为差
+  },
+
+  // 累积布局偏移 (CLS)
+  CLS: {
+    good: 0.1, // 0-0.1 为好
+    needsImprovement: 0.25, // 0.1-0.25 需要改进
+    // > 0.25 为差
+  },
+
+  // 首次字节时间 (TTFB)
+  TTFB: {
+    good: 800, // 0-800ms 为好
+    needsImprovement: 1800, // 800-1800ms 需要改进
+    // > 1800ms 为差
+  },
+
+  // DOM加载时间
+  domReady: {
+    good: 2000,
+    needsImprovement: 4000,
+  },
+
+  // 页面完全加载时间
+  loadTime: {
+    good: 3000,
+    needsImprovement: 6000,
+  },
+
+  // 首屏时间
+  firstScreen: {
+    good: 2500,
+    needsImprovement: 4000,
+  },
+};

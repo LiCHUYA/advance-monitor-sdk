@@ -1,15 +1,26 @@
-import tracker from "../utils/traker.js";
+import { createBehaviorLog } from "../utils/LogFunc/createBehaviorLog.js";
 import { getVisitorId, getSessionId } from "./uv-pv.js";
-import { createBehaviorLog } from "../utils/LogFunc/createBehavior.js";
-import { throttle } from "../utils/throttle.js";
-import { isElementInViewport } from "../utils/viewport.js";
+import tracker from "../utils/traker.js";
 
 // 状态管理
-const state = {
-  lastPageInfo: null,
-  lastEvent: null,
-  isVueRouter: false,
-};
+let lastEvent;
+let lastEventTime = 0;
+const eventThrottleTime = 100; // 事件节流时间（毫秒）
+
+// 更新最后一个事件
+function updateLastEvent(event) {
+  lastEvent = event;
+  lastEventTime = Date.now();
+}
+
+// 检查是否需要记录事件（简单的节流实现）
+function shouldRecordEvent() {
+  const now = Date.now();
+  if (now - lastEventTime >= eventThrottleTime) {
+    return true;
+  }
+  return false;
+}
 
 // 获取元素的埋点数据
 function getElementTrackData(element) {
@@ -88,156 +99,86 @@ function trackExposureEvent(exposureInfo) {
   tracker.send(log);
 }
 
-// 初始化点击事件追踪
-function initClickTracking() {
-  document.addEventListener(
-    "click",
-    (event) => {
-      // 防抖，避免短时间内重复点击
-      if (state.lastEvent && Date.now() - state.lastEvent.timestamp < 50) {
-        return;
-      }
+// 处理点击事件
+function handleClick(event) {
+  if (!shouldRecordEvent()) return;
 
-      const target = event.target;
-      const trackData = getElementTrackData(target);
-
-      if (trackData) {
-        trackClickEvent(trackData);
-      }
-
-      state.lastEvent = {
-        type: "click",
-        timestamp: Date.now(),
-      };
+  const target = event.target;
+  const elementInfo = {
+    tagName: target.tagName?.toLowerCase(),
+    className: target.className,
+    id: target.id,
+    innerText: target.innerText?.slice(0, 50), // 限制文本长度
+    href: target.href,
+    src: target.src,
+    position: {
+      x: event.clientX,
+      y: event.clientY,
     },
-    true
-  );
-}
-
-// 初始化可视区域追踪
-function initVisibilityTracking() {
-  // 创建交叉观察器
-  const observer = new IntersectionObserver(
-    (entries) => {
-      entries.forEach((entry) => {
-        const element = entry.target;
-        const trackData = element.dataset.trackExposure;
-
-        if (trackData && entry.isIntersecting) {
-          // 元素进入可视区域
-          trackExposureEvent({
-            element: getElementTrackData(element),
-            exposureData: trackData,
-            visibleRatio: entry.intersectionRatio,
-          });
-
-          // 如果只需要统计一次曝光，则取消观察
-          if (element.dataset.trackExposureOnce === "true") {
-            observer.unobserve(element);
-          }
-        }
-      });
-    },
-    {
-      threshold: [0, 0.5, 1], // 监听0%、50%、100%可见度
-    }
-  );
-
-  // 观察带有data-track-exposure属性的元素
-  document.querySelectorAll("[data-track-exposure]").forEach((element) => {
-    observer.observe(element);
-  });
-}
-
-// 处理路由变化
-function handleRouteChange(trigger) {
-  const currentPageInfo = {
-    title: document.title,
-    url: location.href,
-    timestamp: Date.now(),
+    path: Array.from(event.path || event.composedPath() || []).map((node) => ({
+      tagName: node.tagName?.toLowerCase(),
+      className: node.className,
+      id: node.id,
+    })),
   };
 
-  // 计算停留时间
-  if (state.lastPageInfo) {
-    const stayDuration =
-      currentPageInfo.timestamp - state.lastPageInfo.timestamp;
+  trackClickEvent(elementInfo);
+  updateLastEvent(event);
+}
 
-    // 发送页面停留时间
-    tracker.send({
-      kind: "behavior",
-      type: "page_stay",
+// 处理页面可见性变化
+function handleVisibilityChange() {
+  const event = {
+    type: "visibility",
+    target: {
+      state: document.visibilityState,
+    },
+    timeStamp: Date.now(),
+  };
+
+  const log = createBehaviorLog(event, {
+    type: "visibility",
+    context: {
       visitorId: getVisitorId(),
       sessionId: getSessionId(),
-      page: state.lastPageInfo,
-      duration: stayDuration,
-      trigger,
-    });
-  }
-
-  // 发送页面切换事件
-  tracker.send({
-    kind: "behavior",
-    type: "page_change",
-    visitorId: getVisitorId(),
-    sessionId: getSessionId(),
-    from: state.lastPageInfo?.url,
-    to: currentPageInfo.url,
-    trigger,
-    timestamp: currentPageInfo.timestamp,
+    },
   });
 
-  state.lastPageInfo = currentPageInfo;
+  tracker.send(log);
 }
 
-// 初始化路由追踪
-function initRouteTracking() {
-  // 监听 popstate 事件（浏览器前进/后退）
-  window.addEventListener("popstate", () => {
-    handleRouteChange("popstate");
-  });
-
-  // 监听 hashchange 事件
-  window.addEventListener("hashchange", () => {
-    handleRouteChange("hashchange");
-  });
-
-  // 重写 history 方法
-  const originalPushState = history.pushState;
-  const originalReplaceState = history.replaceState;
-
-  history.pushState = (...args) => {
-    originalPushState.apply(history, args);
-    handleRouteChange("pushState");
+// 处理页面离开
+function handleBeforeUnload() {
+  const event = {
+    type: "unload",
+    target: {
+      url: window.location.href,
+      title: document.title,
+    },
+    timeStamp: Date.now(),
   };
 
-  history.replaceState = (...args) => {
-    originalReplaceState.apply(history, args);
-    handleRouteChange("replaceState");
-  };
+  const log = createBehaviorLog(event, {
+    type: "unload",
+    context: {
+      visitorId: getVisitorId(),
+      sessionId: getSessionId(),
+    },
+  });
+
+  tracker.send(log);
 }
 
-// Vue Router 集成
-function initVueRouter(router) {
-  if (!router || state.isVueRouter) return;
+// 初始化行为监控
+export function initBehaviorMonitor() {
+  // 监听点击事件
+  window.addEventListener("click", handleClick, true);
 
-  state.isVueRouter = true;
-  router.beforeEach((to, from, next) => {
-    handleRouteChange("vue-router");
-    next();
-  });
-}
+  // 监听页面可见性变化
+  document.addEventListener("visibilitychange", handleVisibilityChange, true);
 
-// 初始化行为追踪
-function init() {
-  state.lastPageInfo = {
-    title: document.title,
-    url: location.href,
-    timestamp: Date.now(),
-  };
-
-  initClickTracking();
-  initVisibilityTracking();
-  initRouteTracking();
+  // 监听页面离开
+  window.addEventListener("beforeunload", handleBeforeUnload, true);
 }
 
 // 手动埋点方法
@@ -260,14 +201,4 @@ export function track(eventName, eventData = {}) {
   });
 
   tracker.send(log);
-}
-
-// 初始化行为追踪
-export function initBehaviorTracker(options = {}) {
-  init();
-
-  // 如果提供了Vue Router实例，则初始化Vue Router追踪
-  if (options.router) {
-    initVueRouter(options.router);
-  }
 }

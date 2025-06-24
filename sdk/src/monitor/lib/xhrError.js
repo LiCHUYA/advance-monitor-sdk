@@ -1,6 +1,6 @@
 // 监听 AJAX 错误
 import { createApiLog } from "../utils/LogFunc/createApiLog";
-import { ErrorTypes, ErrorLevels } from "../constants";
+import { ErrorTypes, ErrorLevels } from "../constants/index";
 
 /**
  * 创建基础请求日志
@@ -87,7 +87,6 @@ export function initXhrErrorCapture() {
       // 成功回调
       xhr.addEventListener("load", async function () {
         const endTime = performance.now();
-
         await createApiLog({
           request: {
             ...requestInfo,
@@ -208,7 +207,11 @@ export function initXhrErrorCapture() {
           statusText: "Network Error",
           endTime: performance.now(),
         },
-        error,
+        error: {
+          name: error.name,
+          message: error.message,
+          stack: error.stack,
+        },
       });
       throw error;
     }

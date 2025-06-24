@@ -1,3 +1,4 @@
+import { createPerformanceLog } from "../utils/LogFunc/createPerformanceLog.js";
 import { createStabilityErrorLog } from "../utils/LogFunc/createStabilityErrorLog.js";
 import { ErrorTypes } from "../constants/index.js";
 import tracker from "../utils/traker.js";
@@ -11,37 +12,25 @@ function formatTimeToMS(time) {
   return `${time.toFixed(3)}ms`;
 }
 
-// 格式化时间戳
-function formatTimestamp(timestamp) {
-  if (typeof timestamp !== "number" || !isFinite(timestamp)) {
-    return "Invalid Timestamp";
-  }
-  const date = new Date(timestamp);
-  return `${date.toISOString()} (${timestamp}ms)`;
-}
-
-// 计算两个时间点之间的时间差（毫秒）
-function calculateTimeDiff(end, start) {
-  // 如果任一时间点无效，返回带说明的对象
-  if (!end || !start) {
+// 计算时间差并格式化
+function calculateTimeDiff(endTime, startTime) {
+  if (!endTime || !startTime) {
     return {
       value: "0.000ms",
-      reason: !end ? "End time missing" : "Start time missing",
+      reason: "Invalid timing values",
     };
   }
-
-  if (end < start) {
-    return {
-      value: "0.000ms",
-      reason: "End time is earlier than start time",
-    };
-  }
-
-  const diff = end - start;
+  const diff = endTime - startTime;
   return {
     value: formatTimeToMS(diff),
-    reason: diff === 0 ? "Possibly cached or too fast to measure" : "",
+    raw: diff,
   };
+}
+
+// 格式化时间戳
+function formatTimestamp(timestamp) {
+  if (!timestamp) return "Invalid timestamp";
+  return new Date(timestamp).toISOString();
 }
 
 // 获取设备和浏览器信息
@@ -685,18 +674,35 @@ function getFMPRating(time) {
   return "poor";
 }
 
-export function initTimingMonitor() {
-  // 确保浏览器支持性能API
-  if (!window.performance || !window.performance.timing) {
-    console.warn("Browser does not support Performance API");
-    return;
-  }
+// 计算性能指标评分
+function calculatePerformanceScore(metrics) {
+  // 权重配置
+  const weights = {
+    FCP: 0.2,
+    LCP: 0.25,
+    FID: 0.3,
+    CLS: 0.25,
+  };
 
-  // 在页面加载完成后收集性能数据
-  window.addEventListener("load", () => {
-    // 给一些时间让最后的性能指标计算完成
-    setTimeout(collectPerformanceMetrics, 0);
+  let totalScore = 0;
+  let totalWeight = 0;
+
+  // 计算每个指标的得分
+  Object.entries(metrics).forEach(([metric, data]) => {
+    if (weights[metric] && data.rating) {
+      const score =
+        data.rating === "good"
+          ? 1
+          : data.rating === "needs-improvement"
+          ? 0.5
+          : 0;
+      totalScore += score * weights[metric];
+      totalWeight += weights[metric];
+    }
   });
+
+  // 返回百分比得分
+  return totalWeight > 0 ? (totalScore / totalWeight) * 100 : 0;
 }
 
 async function collectPerformanceMetrics() {
@@ -705,217 +711,182 @@ async function collectPerformanceMetrics() {
   const pageInfo = getPageInfo();
   const webVitals = await getWebVitals();
 
-  const metrics = {
-    // 元信息
-    meta: {
-      // 监控指标大类
-      kind: "performance",
-      // 日志类型
-      type: "timing",
-      // 记录时间
-      timestamp: formatTimestamp(Date.now()),
-      // 采样率（可配置）
-      sampling: 1,
-      // 版本信息
-      version: "1.0.0",
+  // 详细的性能指标
+  const detailedMetrics = {
+    // 总体时间
+    total: {
+      // 页面完全加载时间
+      loadTime: calculateTimeDiff(timing.loadEventEnd, timing.navigationStart)
+        .value,
+      // DOM Ready时间
+      domReadyTime: calculateTimeDiff(
+        timing.domContentLoadedEventEnd,
+        timing.navigationStart
+      ).value,
+      // 首屏时间
+      firstScreenTime: calculateTimeDiff(
+        timing.domInteractive,
+        timing.navigationStart
+      ).value,
     },
 
-    // 页面信息
-    page: pageInfo,
+    // 导航阶段
+    navigation: {
+      // 重定向次数
+      redirectCount: performance.navigation.redirectCount,
+      // 重定向耗时
+      ...calculateTimeDiff(timing.redirectEnd, timing.redirectStart),
+    },
 
-    // 设备和环境信息
-    ...deviceInfo,
+    // DNS解析
+    dns: {
+      // DNS查询耗时
+      ...calculateTimeDiff(timing.domainLookupEnd, timing.domainLookupStart),
+    },
 
-    // Web Vitals 指标
-    webVitals,
+    // TCP连接
+    tcp: {
+      // TCP连接耗时
+      ...calculateTimeDiff(timing.connectEnd, timing.connectStart),
+      // SSL安全连接耗时
+      ...(timing.secureConnectionStart
+        ? {
+            secureConnectionTime: calculateTimeDiff(
+              timing.connectEnd,
+              timing.secureConnectionStart
+            ).value,
+          }
+        : {
+            secureConnectionTime: "0.000ms",
+            reason: "No HTTPS connection",
+          }),
+    },
 
-    // 性能指标
-    timing: {
-      // 总体时间
-      total: {
-        // 页面完全加载时间
-        loadTime: calculateTimeDiff(timing.loadEventEnd, timing.navigationStart)
-          .value,
-        // DOM Ready时间
-        domReadyTime: calculateTimeDiff(
-          timing.domContentLoadedEventEnd,
-          timing.navigationStart
-        ).value,
-        // 首屏时间
-        firstScreenTime: calculateTimeDiff(
-          timing.domInteractive,
-          timing.navigationStart
-        ).value,
-      },
+    // 请求响应
+    request: {
+      // 请求耗时
+      ...calculateTimeDiff(timing.responseStart, timing.requestStart),
+      // 响应耗时
+      ...calculateTimeDiff(timing.responseEnd, timing.responseStart),
+      // 内容传输耗时
+      transferTime: calculateTimeDiff(timing.responseEnd, timing.responseStart)
+        .value,
+    },
 
-      // 导航阶段
-      navigation: {
-        // 重定向次数
-        redirectCount: performance.navigation.redirectCount,
-        // 重定向耗时
-        ...calculateTimeDiff(timing.redirectEnd, timing.redirectStart),
-      },
+    // 处理阶段
+    processing: {
+      // DOM解析耗时
+      ...calculateTimeDiff(timing.domInteractive, timing.responseEnd),
+      // DOM完成时间
+      ...calculateTimeDiff(timing.domComplete, timing.domLoading),
+      // 资源加载耗时
+      ...calculateTimeDiff(
+        timing.loadEventStart,
+        timing.domContentLoadedEventEnd
+      ),
+    },
 
-      // DNS解析
-      dns: {
-        // DNS查询耗时
-        ...calculateTimeDiff(timing.domainLookupEnd, timing.domainLookupStart),
-      },
-
-      // TCP连接
-      tcp: {
-        // TCP连接耗时
-        ...calculateTimeDiff(timing.connectEnd, timing.connectStart),
-        // SSL安全连接耗时
-        ...(timing.secureConnectionStart
-          ? {
-              secureConnectionTime: calculateTimeDiff(
-                timing.connectEnd,
-                timing.secureConnectionStart
-              ).value,
-            }
-          : {
-              secureConnectionTime: "0.000ms",
-              reason: "No HTTPS connection",
-            }),
-      },
-
-      // 请求响应
-      request: {
-        // 请求耗时
-        ...calculateTimeDiff(timing.responseStart, timing.requestStart),
-        // 响应耗时
-        ...calculateTimeDiff(timing.responseEnd, timing.responseStart),
-        // 内容传输耗时
-        transferTime: calculateTimeDiff(
-          timing.responseEnd,
-          timing.responseStart
-        ).value,
-      },
-
-      // 处理阶段
-      processing: {
-        // DOM解析耗时
-        ...calculateTimeDiff(timing.domInteractive, timing.responseEnd),
-        // DOM完成时间
-        ...calculateTimeDiff(timing.domComplete, timing.domLoading),
-        // 资源加载耗时
-        ...calculateTimeDiff(
-          timing.loadEventStart,
-          timing.domContentLoadedEventEnd
-        ),
-      },
-
-      // 关键时间点
-      timeStamps: {
-        // 开始导航的时间
-        navigationStart: formatTimestamp(timing.navigationStart),
-        // 开始重定向的时间
-        redirectStart: formatTimestamp(timing.redirectStart),
-        // 重定向完成的时间
-        redirectEnd: formatTimestamp(timing.redirectEnd),
-        // 开始DNS查询的时间
-        fetchStart: formatTimestamp(timing.fetchStart),
-        // DNS查询开始的时间
-        domainLookupStart: formatTimestamp(timing.domainLookupStart),
-        // DNS查询完成的时间
-        domainLookupEnd: formatTimestamp(timing.domainLookupEnd),
-        // 开始建立TCP连接的时间
-        connectStart: formatTimestamp(timing.connectStart),
-        // SSL连接开始的时间
-        secureConnectionStart: timing.secureConnectionStart
-          ? formatTimestamp(timing.secureConnectionStart)
-          : "No HTTPS",
-        // TCP连接完成的时间
-        connectEnd: formatTimestamp(timing.connectEnd),
-        // 开始请求的时间
-        requestStart: formatTimestamp(timing.requestStart),
-        // 开始接收响应的时间
-        responseStart: formatTimestamp(timing.responseStart),
-        // 响应结束的时间
-        responseEnd: formatTimestamp(timing.responseEnd),
-        // DOM开始解析的时间
-        domLoading: formatTimestamp(timing.domLoading),
-        // DOM解析完成的时间
-        domInteractive: formatTimestamp(timing.domInteractive),
-        // DOMContentLoaded事件开始的时间
-        domContentLoadedEventStart: formatTimestamp(
-          timing.domContentLoadedEventStart
-        ),
-        // DOMContentLoaded事件完成的时间
-        domContentLoadedEventEnd: formatTimestamp(
-          timing.domContentLoadedEventEnd
-        ),
-        // DOM树解析完成的时间
-        domComplete: formatTimestamp(timing.domComplete),
-        // load事件开始的时间
-        loadEventStart: formatTimestamp(timing.loadEventStart),
-        // load事件完成的时间
-        loadEventEnd: formatTimestamp(timing.loadEventEnd),
-      },
+    // 关键时间点
+    timeStamps: {
+      // 开始导航的时间
+      navigationStart: formatTimestamp(timing.navigationStart),
+      // 开始重定向的时间
+      redirectStart: formatTimestamp(timing.redirectStart),
+      // 重定向完成的时间
+      redirectEnd: formatTimestamp(timing.redirectEnd),
+      // 开始DNS查询的时间
+      fetchStart: formatTimestamp(timing.fetchStart),
+      // DNS查询开始的时间
+      domainLookupStart: formatTimestamp(timing.domainLookupStart),
+      // DNS查询完成的时间
+      domainLookupEnd: formatTimestamp(timing.domainLookupEnd),
+      // 开始建立TCP连接的时间
+      connectStart: formatTimestamp(timing.connectStart),
+      // SSL连接开始的时间
+      secureConnectionStart: timing.secureConnectionStart
+        ? formatTimestamp(timing.secureConnectionStart)
+        : "No HTTPS",
+      // TCP连接完成的时间
+      connectEnd: formatTimestamp(timing.connectEnd),
+      // 开始请求的时间
+      requestStart: formatTimestamp(timing.requestStart),
+      // 开始接收响应的时间
+      responseStart: formatTimestamp(timing.responseStart),
+      // 响应结束的时间
+      responseEnd: formatTimestamp(timing.responseEnd),
+      // DOM开始解析的时间
+      domLoading: formatTimestamp(timing.domLoading),
+      // DOM解析完成的时间
+      domInteractive: formatTimestamp(timing.domInteractive),
+      // DOMContentLoaded事件开始的时间
+      domContentLoadedEventStart: formatTimestamp(
+        timing.domContentLoadedEventStart
+      ),
+      // DOMContentLoaded事件完成的时间
+      domContentLoadedEventEnd: formatTimestamp(
+        timing.domContentLoadedEventEnd
+      ),
+      // DOM树解析完成的时间
+      domComplete: formatTimestamp(timing.domComplete),
+      // load事件开始的时间
+      loadEventStart: formatTimestamp(timing.loadEventStart),
+      // load事件完成的时间
+      loadEventEnd: formatTimestamp(timing.loadEventEnd),
     },
   };
 
-  // 添加首屏绘制时间 (如果支持)
-  if (window.performance.getEntriesByType) {
-    const paintMetrics = performance.getEntriesByType("paint");
-    if (paintMetrics && paintMetrics.length) {
-      metrics.paint = {};
-      paintMetrics.forEach((entry) => {
-        metrics.paint[entry.name] = formatTimeToMS(entry.startTime);
-      });
-    } else {
-      metrics.paint = {
-        reason: "Paint Timing API not available or no paint events recorded",
-      };
-    }
-  }
-
   // 收集资源加载时间
+  let resources = [];
   if (window.performance.getEntriesByType) {
-    const resourceMetrics = performance.getEntriesByType("resource");
-    if (resourceMetrics) {
-      metrics.resources = resourceMetrics.map((resource) => ({
-        name: resource.name,
-        type: resource.initiatorType,
-        duration: formatTimeToMS(resource.duration),
-        size: resource.transferSize,
-        protocol: resource.nextHopProtocol,
-        timing: {
-          redirect: calculateTimeDiff(
-            resource.redirectEnd,
-            resource.redirectStart
-          ).value,
-          dns: calculateTimeDiff(
-            resource.domainLookupEnd,
-            resource.domainLookupStart
-          ).value,
-          tcp: calculateTimeDiff(resource.connectEnd, resource.connectStart)
-            .value,
-          request: calculateTimeDiff(
-            resource.responseStart,
-            resource.requestStart
-          ).value,
-          response: calculateTimeDiff(
-            resource.responseEnd,
-            resource.responseStart
-          ).value,
-        },
-      }));
-    }
+    resources = performance.getEntriesByType("resource").map((resource) => ({
+      name: resource.name,
+      type: resource.initiatorType,
+      duration: resource.duration,
+      size: resource.transferSize,
+      protocol: resource.nextHopProtocol,
+      timing: {
+        redirect: calculateTimeDiff(
+          resource.redirectEnd,
+          resource.redirectStart
+        ).value,
+        dns: calculateTimeDiff(
+          resource.domainLookupEnd,
+          resource.domainLookupStart
+        ).value,
+        tcp: calculateTimeDiff(resource.connectEnd, resource.connectStart)
+          .value,
+        request: calculateTimeDiff(
+          resource.responseStart,
+          resource.requestStart
+        ).value,
+        response: calculateTimeDiff(
+          resource.responseEnd,
+          resource.responseStart
+        ).value,
+      },
+    }));
   }
 
-  console.log("Performance Metrics:", metrics);
+  // 创建性能日志
+  const log = createPerformanceLog(
+    {
+      ...detailedMetrics,
+      webVitals,
+    },
+    {
+      resources,
+      sampling: 1,
+      version: "1.0.0",
+      deviceInfo,
+      pageInfo,
+    }
+  );
 
-  // 发送性能数据时包含所有信息
-  tracker.send({
-    kind: "performance",
-    type: "timing",
-    ...metrics,
-  });
+  // 发送性能数据
+  tracker.send(log);
 
-  // 如果加载时间过长，创建性能警告日志
-  const loadTimeThreshold = 5000; // 5秒
+  // 检查性能问题
+  const loadTimeThreshold = 5000;
   const actualLoadTime = timing.loadEventEnd - timing.navigationStart;
   if (actualLoadTime > loadTimeThreshold) {
     const error = new Error("Page load time exceeded threshold");
@@ -925,7 +896,7 @@ async function collectPerformanceMetrics() {
           actualLoadTime
         )}) exceeded threshold (${formatTimeToMS(loadTimeThreshold)})`,
         error,
-        performance: metrics,
+        performance: log.performance,
       },
       {
         kind: "performance",
@@ -941,25 +912,17 @@ async function collectPerformanceMetrics() {
   }
 }
 
-// 获取首屏时间的辅助函数
-function getFirstScreenTime() {
-  return new Promise((resolve) => {
-    if (document.readyState === "complete") {
-      resolve(
-        formatTimeToMS(
-          performance.timing.domInteractive - performance.timing.navigationStart
-        )
-      );
-    } else {
-      window.addEventListener("load", () => {
-        resolve(
-          formatTimeToMS(
-            performance.timing.domInteractive -
-              performance.timing.navigationStart
-          )
-        );
-      });
-    }
+export function initTimingMonitor() {
+  // 确保浏览器支持性能API
+  if (!window.performance || !window.performance.timing) {
+    console.warn("Browser does not support Performance API");
+    return;
+  }
+
+  // 在页面加载完成后收集性能数据
+  window.addEventListener("load", () => {
+    // 给一些时间让最后的性能指标计算完成
+    setTimeout(collectPerformanceMetrics, 0);
   });
 }
 

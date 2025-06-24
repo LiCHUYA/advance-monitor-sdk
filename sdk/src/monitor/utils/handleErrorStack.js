@@ -3,11 +3,34 @@ import { ErrorTypes } from "../constants/index.js";
 /**
  * 处理错误堆栈信息，将其转换为更易读的格式
  * @param {string} stack 原始的错误堆栈字符串
- * @returns {Array<{line: string, row: number, col: number, filename: string, function: string}>} 格式化后的堆栈信息
+ * @returns {Promise<Array<{line: string, row: number, col: number, filename: string, function: string}>>} 格式化后的堆栈信息
  */
-export function handleErrorStack(stack) {
+export async function handleErrorStack(stack) {
   if (!stack) return [];
 
+  try {
+    const { parseErrorStack } = await import("../lib/sourcemap.js");
+    const error = new Error();
+    error.stack = stack;
+
+    const parsedError = await parseErrorStack(error, {
+      url: window.trackConfig?.sourceMapUrl,
+    });
+
+    if (parsedError.stack && Array.isArray(parsedError.stack)) {
+      return parsedError.stack.map((frame) => ({
+        function: frame.functionName || "<anonymous>",
+        filename: frame.fileName || "",
+        line: frame.line || 0,
+        column: frame.column || 0,
+        contextCode: frame.contextCode,
+      }));
+    }
+  } catch (err) {
+    console.warn("解析错误堆栈失败:", err);
+  }
+
+  // 回退到原始堆栈解析
   return stack
     .split("\n")
     .slice(1) // 去掉第一行（错误信息）
@@ -31,12 +54,12 @@ export function handleErrorStack(stack) {
 /**
  * 格式化错误信息，使其更易读
  * @param {Error} error 错误对象
- * @returns {string} 格式化后的错误信息
+ * @returns {Promise<string>} 格式化后的错误信息
  */
-export function formatError(error) {
+export async function formatError(error) {
   if (!error) return "";
 
-  const stackFrames = handleErrorStack(error.stack);
+  const stackFrames = await handleErrorStack(error.stack);
   let formattedError = `🚨 ${error.name}: ${error.message}\n`;
 
   if (stackFrames.length > 0) {
@@ -44,9 +67,12 @@ export function formatError(error) {
       "\n调用栈:\n" +
       stackFrames
         .map((frame, index) => {
-          return `  ${index + 1}. ${frame.function}\n     at ${
+          const context = frame.contextCode
+            ? `\n     ${frame.contextCode.split("\n").join("\n     ")}`
+            : "";
+          return `  ${index + 1}. ${frame.function}\n     位于 ${
             frame.filename
-          }:${frame.line}:${frame.column}`;
+          }:${frame.line}:${frame.column}${context}`;
         })
         .join("\n");
   }

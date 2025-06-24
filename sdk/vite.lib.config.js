@@ -31,7 +31,7 @@ export default defineConfig({
         footer: `/*! End of MonitorSDK */`,
       },
     },
-    sourcemap: true,
+    // sourcemap: true,
     minify: "terser",
     terserOptions: {
       compress: {
