@@ -7,6 +7,7 @@ import {
   initBehaviorMonitor,
 } from "./monitor";
 
+import { uploadSourceMap, createErrorReport } from "./monitor/lib/sourcemap.js";
 import tracker from "./monitor/utils/traker.js";
 
 class AdvanceMonitor {
@@ -20,59 +21,42 @@ class AdvanceMonitor {
       version: "", // 应用版本号
 
       // sourcemap配置
-      sourcemapUploadUrl: "", // sourcemap上传地址
-      sourcemapInfo: null, // sourcemap信息，包含 {hash, id, url}
+      sourcemapUploadUrl: "", // sourcemap上传地址（仅在发布时使用）
 
       // 功能开关
-      enableBehavior: true, // 是否开启行为监控
-      enableUvPv: true, // 是否开启UV/PV统计
-      enableJsError: true, // 是否开启JS错误监控
-      enableXhrError: true, // 是否开启接口错误监控
-      enableBlankScreen: true, // 是否开启白屏监控
-      enablePerformance: true, // 是否开启性能监控
+      enableBehavior: true,
+      enableUvPv: true,
+      enableJsError: true,
+      enableXhrError: true,
+      enableBlankScreen: true,
+      enablePerformance: true,
     };
 
-    // 尝试从本地存储加载配置
     this.loadConfigFromStorage();
   }
 
   /**
-   * 上传sourcemap
-   * @param {Object|string|File} sourceMap - sourcemap内容（JSON字符串或对象）或File对象
-   * @param {Object} [options] - 上传选项
-   * @param {string} [options.version] - 应用版本号，如果不提供则使用当前配置的版本号
-   * @param {string} [options.uploadUrl] - 上传地址，如果不提供则使用当前配置的地址
-   * @returns {Promise<Object>} - 上传结果
+   * 上传sourcemap（仅在发布流程中使用）
    */
   async uploadSourceMap(sourceMap, options = {}) {
-    // 使用配置中的值作为默认值
     const uploadOptions = {
       version: this.config.version,
       uploadUrl: this.config.sourcemapUploadUrl,
       ...options,
-      sourceMap, // 确保sourceMap参数被正确传递
+      sourceMap,
+      metadata: {
+        appId: this.config.appId,
+        timestamp: Date.now(),
+        ...options.metadata,
+      },
     };
 
-    // 验证必要的配置
-    if (!uploadOptions.version) {
-      throw new Error(
-        "[AdvanceMonitor] 请提供应用版本号，可以在init时配置或在上传时提供"
-      );
-    }
-    if (!uploadOptions.uploadUrl) {
-      throw new Error(
-        "[AdvanceMonitor] 请提供sourcemap上传地址，可以在init时配置或在上传时提供"
-      );
+    if (!uploadOptions.version || !uploadOptions.uploadUrl) {
+      throw new Error("请提供版本号和上传地址");
     }
 
     try {
-      const result = await uploadSourceMap(uploadOptions);
-
-      // 保存sourcemap信息
-      this.config.sourcemapInfo = result;
-      this.saveConfigToStorage();
-
-      return result;
+      return await uploadSourceMap(uploadOptions);
     } catch (error) {
       console.error("[AdvanceMonitor] 上传sourcemap失败:", error);
       throw error;
@@ -118,29 +102,16 @@ class AdvanceMonitor {
       return;
     }
 
-    // 合并配置
     this.config = {
       ...this.config,
       ...config,
     };
 
-    // 验证必要的配置
-    if (!this.config.url) {
-      throw new Error("[AdvanceMonitor] 缺少上报接口地址(url)配置");
-    }
-    if (!this.config.appId) {
-      throw new Error("[AdvanceMonitor] 缺少应用标识(appId)配置");
-    }
-    if (this.config.enableJsError && !this.config.sourcemapInfo?.url) {
-      console.warn(
-        "[AdvanceMonitor] 已开启JS错误监控，但未上传sourcemap，将无法进行源码映射"
-      );
+    if (!this.config.url || !this.config.appId) {
+      throw new Error("[AdvanceMonitor] 缺少必要配置");
     }
 
-    // 保存配置到本地存储
     this.saveConfigToStorage();
-
-    // 配置上报接口
     tracker.url = this.config.url;
 
     try {
@@ -155,11 +126,14 @@ class AdvanceMonitor {
 
       if (this.config.enableJsError) {
         initJsErrorCapture({
-          sourceMapInfo: this.config.sourcemapInfo,
-          beforeSend: (event) => {
-            event.appId = this.config.appId;
-            event.userId = this.config.userId;
-            return event;
+          beforeSend: (error) => {
+            // 创建包含压缩位置的错误报告
+            return createErrorReport(error, {
+              appId: this.config.appId,
+              userId: this.config.userId,
+              version: this.config.version,
+              // 其他上下文信息...
+            });
           },
         });
       }
@@ -204,15 +178,10 @@ class AdvanceMonitor {
       });
     } catch (error) {
       console.error("[AdvanceMonitor] 初始化失败:", error);
-
-      // 发送初始化失败事件
       tracker.send({
         kind: "lifecycle",
         type: "init_error",
-        error: {
-          message: error.message,
-          stack: error.stack,
-        },
+        error: createErrorReport(error),
         config: this.config,
         timestamp: Date.now(),
       });

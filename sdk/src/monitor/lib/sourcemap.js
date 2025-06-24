@@ -27,56 +27,38 @@ export function initSourceMap(options) {
 }
 
 /**
- * 上传sourcemap文件并获取元信息
+ * 上传sourcemap文件
  * @param {Object} options - 上传选项
  * @param {string} options.version - 应用版本号
  * @param {string} options.uploadUrl - 上传接口地址
- * @param {string|Object} options.sourceMap - sourcemap内容（JSON字符串或对象）或File对象
- * @returns {Promise<Object>} - 上传结果，包含hash、id和url
+ * @param {string|Object|File} options.sourceMap - sourcemap文件
+ * @param {Object} [options.metadata] - 元数据信息
+ * @returns {Promise<Object>} 上传结果
  */
 export async function uploadSourceMap(options) {
   try {
-    if (!options.version) {
-      throw new Error("必须提供应用版本号");
-    }
-    if (!options.uploadUrl) {
-      throw new Error("必须提供上传地址");
-    }
-    if (!options.sourceMap) {
-      throw new Error("必须提供sourcemap内容");
+    if (!options.version || !options.uploadUrl || !options.sourceMap) {
+      throw new Error("缺少必要参数：version、uploadUrl、sourceMap");
     }
 
-    let formData = new FormData();
+    const formData = new FormData();
     formData.append("version", options.version);
 
-    // 处理不同类型的sourceMap输入
+    // 添加元数据
+    if (options.metadata) {
+      formData.append("metadata", JSON.stringify(options.metadata));
+    }
+
+    // 处理sourcemap文件
     if (options.sourceMap instanceof File) {
-      // 如果是File对象，直接使用
       formData.append("sourceMap", options.sourceMap);
-    } else if (
-      typeof options.sourceMap === "string" ||
-      typeof options.sourceMap === "object"
-    ) {
-      // 如果是字符串或对象，转换为JSON字符串
+    } else {
       const content =
         typeof options.sourceMap === "string"
           ? options.sourceMap
           : JSON.stringify(options.sourceMap);
-
-      try {
-        // 验证是否是有效的JSON
-        JSON.parse(
-          typeof options.sourceMap === "string" ? options.sourceMap : content
-        );
-      } catch (e) {
-        throw new Error("提供的sourcemap内容不是有效的JSON");
-      }
-
-      // 创建文件对象
       const blob = new Blob([content], { type: "application/json" });
-      formData.append("sourceMap", blob, "sourcemap.json");
-    } else {
-      throw new Error("不支持的sourcemap格式");
+      formData.append("sourceMap", blob, `sourcemap-${options.version}.json`);
     }
 
     const response = await fetch(options.uploadUrl, {
@@ -88,23 +70,70 @@ export async function uploadSourceMap(options) {
       throw new Error(`上传失败: ${response.statusText}`);
     }
 
-    const result = await response.json();
-
-    // 验证返回结果
-    if (!result.hash || !result.id || !result.url) {
-      throw new Error("服务端返回格式错误，需要包含 hash、id 和 url");
-    }
-
-    return {
-      hash: result.hash,
-      id: result.id,
-      url: result.url,
-      version: options.version,
-    };
+    return await response.json();
   } catch (error) {
     console.error("上传sourcemap失败:", error);
     throw error;
   }
+}
+
+/**
+ * 创建错误报告
+ * @param {Error} error - 错误对象
+ * @param {Object} [options] - 附加选项
+ * @returns {Object} 错误报告对象
+ */
+export function createErrorReport(error, options = {}) {
+  return {
+    // 错误基本信息
+    name: error.name,
+    message: error.message,
+    stack: error.stack,
+
+    // 运行时信息
+    timestamp: Date.now(),
+    url: window.location.href,
+    userAgent: navigator.userAgent,
+
+    // 版本信息
+    release: options.version || "",
+
+    // 原始错误位置（压缩后的）
+    frames: parseErrorFrames(error.stack),
+
+    // 其他上下文信息
+    ...options,
+  };
+}
+
+/**
+ * 解析错误堆栈帧
+ * @private
+ * @param {string} stack - 错误堆栈
+ * @returns {Array} 堆栈帧数组
+ */
+function parseErrorFrames(stack) {
+  if (!stack) return [];
+
+  return stack
+    .split("\n")
+    .slice(1)
+    .map((line) => {
+      const match = line.match(
+        /^\s*at\s+(.+?)\s*\(?(.*?)(?::(\d+))?(?::(\d+))?\)?$/
+      );
+      if (!match) return null;
+
+      const [, fnName, fileName, lineNo, colNo] = match;
+      return {
+        function: fnName,
+        filename: fileName,
+        lineno: lineNo ? parseInt(lineNo, 10) : undefined,
+        colno: colNo ? parseInt(colNo, 10) : undefined,
+        in_app: !fileName.includes("node_modules"),
+      };
+    })
+    .filter(Boolean);
 }
 
 /**
